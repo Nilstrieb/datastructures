@@ -49,24 +49,25 @@ impl<T> LinkedList<T> {
         }
     }
 
-    pub fn insert_end(&mut self, element: T) {}
+    pub fn _insert_end(&mut self, _element: T) {}
 
-    /// Random access over the list
-    pub fn get(&self, index: usize) -> Option<&T> {
-        fn get_inner<T2>(node: Option<&NonNull<Node<T2>>>, index: usize) -> Option<&Node<T2>> {
-            match node {
-                // SAFETY: All pointers should always be valid
-                Some(ptr) => match index {
-                    0 => unsafe { Some(ptr.as_ref()) },
-                    n => get_inner(unsafe { ptr.as_ref() }.next.as_ref(), n - 1),
-                },
-                None => None,
+    pub fn get(&self, mut index: usize) -> Option<&T> {
+        let mut node = &self.start;
+        let mut result = None;
+        while let Some(content) = node {
+            // SAFETY: All pointers should always be valid
+            let content = unsafe { content.as_ref() };
+            if index == 0 {
+                result = Some(&content.value);
+                break;
             }
+            index -= 1;
+            node = &content.next;
         }
-        get_inner(self.start.as_ref(), index).map(|n| &n.value)
+        result
     }
 
-    pub fn get_node(&self, index: usize) {}
+    pub fn _get_node(&self, _index: usize) {}
 
     /// Returns an iterator over the items
     pub fn iter(&self) -> Iter<T> {
@@ -83,6 +84,12 @@ where
     }
 }
 
+impl<T> Default for LinkedList<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Drop for LinkedList<T> {
     fn drop(&mut self) {
         let mut item = self.start;
@@ -96,6 +103,7 @@ impl<T> Drop for LinkedList<T> {
     }
 }
 
+/// A Node in a `LinkedList`
 #[derive(Debug)]
 pub struct Node<T> {
     value: T,
@@ -105,7 +113,7 @@ pub struct Node<T> {
 }
 
 fn allocate_nonnull<T>(element: T) -> NonNull<T> {
-    let mut boxed = Box::new(element);
+    let boxed = Box::new(element);
     // SAFETY: box is always non-null
     unsafe { NonNull::new_unchecked(Box::leak(boxed)) }
 }
@@ -117,11 +125,10 @@ pub struct Iter<'a, T> {
 impl<'a, T> Iter<'a, T> {
     fn new(list: &'a LinkedList<T>) -> Self {
         Self {
-            item: match list.start {
+            item: list.start.as_ref().map(|nn| {
                 // SAFETY: All pointers should always be valid, the list lives as long as its items
-                Some(ref nn) => unsafe { Some(nn.as_ref()) },
-                None => None,
-            },
+                unsafe { nn.as_ref() }
+            }),
         }
     }
 }
@@ -133,13 +140,10 @@ impl<'a, T: Debug> Iterator for Iter<'a, T> {
         let current = self.item;
         match current {
             Some(node) => {
-                self.item = match &node.next {
-                    Some(ref nn) => {
-                        // SAFETY: All pointers should always be valid
-                        unsafe { Some(nn.as_ref()) }
-                    }
-                    None => None,
-                };
+                self.item = node.next.as_ref().map(|nn| {
+                    // SAFETY: All pointers should always be valid
+                    unsafe { nn.as_ref() }
+                });
                 Some(&node.value)
             }
             None => None,
