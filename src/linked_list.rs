@@ -11,27 +11,28 @@ use std::ptr::NonNull;
 ///
 /// # How to use
 /// ```
-/// use datastructures::linked_list::LinkedList;
-///
+/// # use datastructures::linked_list::LinkedList;
+/// #
 /// let mut list = LinkedList::new();
 /// list.push_front("hello");
 /// assert_eq!(list.get(0), Some(&"hello"));
-/// list.push_end("bye");
+/// list.push_back("bye");
 /// assert_eq!(list.get(1), Some(&"bye"));
 /// ```
 ///
 /// The list can also be edited using the `Node` methods
 /// ```
-/// use datastructures::linked_list::LinkedList;
-///
+/// # use datastructures::linked_list::LinkedList;
+/// #
 /// let mut list = LinkedList::new();
+///
 /// list.push_front(1);
-/// let mut node = list.get_head_node_mut().unwrap();
+/// let mut node = list.get_mut_head_node().unwrap();
 /// node.push_after(3);
 /// node.push_after(2);
-/// let next = node.get_next().unwrap();
-/// let next = next.get_next().unwrap();
-/// assert_eq!(*next.get_value(), 3);
+/// let next = node.next().unwrap();
+/// let next = next.next().unwrap();
+/// assert_eq!(*next.get(), 3);
 /// ```
 ///
 /// # Note
@@ -61,7 +62,6 @@ impl<T> LinkedList<T> {
                     value: element,
                     next: None,
                     prev: None,
-                    _marker: PhantomData,
                 });
                 self.start = Some(new_node);
                 self.end = Some(new_node);
@@ -72,7 +72,6 @@ impl<T> LinkedList<T> {
                     value: element,
                     next: Some(old_start),
                     prev: None,
-                    _marker: PhantomData,
                 });
                 // SAFETY: All pointers should always be valid
                 unsafe { old_start.as_mut() }.prev = Some(new_node);
@@ -82,14 +81,13 @@ impl<T> LinkedList<T> {
     }
 
     /// Push an element to the end of the list (O(1))
-    pub fn push_end(&mut self, element: T) {
+    pub fn push_back(&mut self, element: T) {
         match self.end {
             None => {
                 let new_node = allocate_nonnull(Node {
                     value: element,
                     next: None,
                     prev: None,
-                    _marker: PhantomData,
                 });
                 self.start = Some(new_node);
                 self.end = Some(new_node);
@@ -99,7 +97,6 @@ impl<T> LinkedList<T> {
                     value: element,
                     next: None,
                     prev: Some(old_end),
-                    _marker: PhantomData,
                 });
                 // SAFETY: All pointers should always be valid
                 unsafe { old_end.as_mut() }.next = Some(new_node);
@@ -162,17 +159,17 @@ impl<T> LinkedList<T> {
         self.end.as_ref().map(|nn| unsafe { nn.as_ref() })
     }
     /// Get the head node from the list that can be used the edit the list
-    pub fn get_head_node_mut(&mut self) -> Option<&mut Node<T>> {
+    pub fn get_mut_head_node(&mut self) -> Option<&mut Node<T>> {
         self.start.as_mut().map(|nn| unsafe { nn.as_mut() })
     }
 
     /// Get the tail node from the list that can be used the edit the list
-    pub fn get_tail_node_mut(&mut self) -> Option<&mut Node<T>> {
+    pub fn get_mut_tail_node(&mut self) -> Option<&mut Node<T>> {
         self.end.as_mut().map(|nn| unsafe { nn.as_mut() })
     }
 
     /// Get a node from the list that can be used the edit the list
-    pub fn get_node_mut(&mut self, mut index: usize) -> Option<&mut Node<T>> {
+    pub fn get_mut_node(&mut self, mut index: usize) -> Option<&mut Node<T>> {
         let mut node = &mut self.start;
         let mut result = None;
         while let Some(ref mut content) = node {
@@ -186,6 +183,15 @@ impl<T> LinkedList<T> {
             node = &mut content.next;
         }
         result
+    }
+
+    /// Calculates the length of the list
+    /// # Important
+    /// This implementation is O(n), since unlike in `std::collections::LinkedList`, the length of the list is not stored
+    /// (and can't be because the list can be modified through nodes - a node could theoretically have a reference to the list,
+    /// but that would make node extraction slower because you'd always have to construct a new struct.
+    pub fn len(&self) -> usize {
+        self.iter().count()
     }
 
     /// Returns an iterator over the items
@@ -225,11 +231,11 @@ impl<T> Drop for LinkedList<T> {
 ///
 /// # Examples
 /// ```
-/// use datastructures::linked_list::*;
-///
+/// # use datastructures::linked_list::*;
+/// #
 /// let mut list = LinkedList::new();
 /// list.push_front(1);
-/// let mut node = list.get_node_mut(0);
+/// let mut node = list.get_mut_node(0);
 /// ```
 ///
 #[derive(Debug)]
@@ -237,7 +243,6 @@ pub struct Node<T> {
     value: T,
     next: Option<NonNull<Node<T>>>,
     prev: Option<NonNull<Node<T>>>,
-    _marker: PhantomData<T>,
 }
 
 impl<T> Node<T> {
@@ -247,7 +252,6 @@ impl<T> Node<T> {
             value: element,
             next: self.next,
             prev: NonNull::new(self as _),
-            _marker: PhantomData,
         }));
         self.next.map(|mut next| {
             // SAFETY: All pointers should always be valid and created from a box
@@ -262,7 +266,6 @@ impl<T> Node<T> {
             value: element,
             next: NonNull::new(self as _),
             prev: self.prev,
-            _marker: PhantomData,
         }));
         self.prev.map(|mut next| {
             // SAFETY: All pointers should always be valid and created from a box
@@ -272,49 +275,51 @@ impl<T> Node<T> {
     }
 
     /// Get the next node
-    pub fn get_next(&self) -> Option<&Node<T>> {
-        match &self.next {
-            None => None,
-            Some(nn) => unsafe { Some(nn.as_ref()) },
-        }
+    pub fn next(&self) -> Option<&Node<T>> {
+        self.next.as_ref().map(|nn| unsafe { nn.as_ref() })
     }
+
     /// Get the next node mutably
-    pub fn get_next_mut(&mut self) -> Option<&mut Node<T>> {
-        match &mut self.next {
-            None => None,
-            Some(nn) => unsafe { Some(nn.as_mut()) },
-        }
+    pub fn next_mut(&mut self) -> Option<&mut Node<T>> {
+        self.next.as_mut().map(|nn| unsafe { nn.as_mut() })
     }
 
     /// Get the previous node
-    pub fn get_previous(&self) -> Option<&Node<T>> {
-        match &self.prev {
-            None => None,
-            Some(nn) => unsafe { Some(nn.as_ref()) },
-        }
+    pub fn previous(&self) -> Option<&Node<T>> {
+        self.prev.as_ref().map(|nn| unsafe { nn.as_ref() })
     }
 
     /// Get the previous node mutably
-    pub fn get_previous_mut(&mut self) -> Option<&mut Node<T>> {
-        match &mut self.prev {
-            None => None,
-            Some(nn) => unsafe { Some(nn.as_mut()) },
-        }
+    pub fn previous_mut(&mut self) -> Option<&mut Node<T>> {
+        self.prev.as_mut().map(|nn| unsafe { nn.as_mut() })
     }
 
     /// Gets the value from the node
-    pub fn get_value(&self) -> &T {
+    pub fn get(&self) -> &T {
         &self.value
     }
 
     /// Gets the value from the node
-    pub fn set_value(&mut self, value: T) {
+    pub fn set(&mut self, value: T) {
         self.value = value;
     }
 
     /// Gets the value from the node and replaces it with the old one
     pub fn replace_value(&mut self, value: T) -> T {
         std::mem::replace(&mut self.value, value)
+    }
+
+    /// Removes a value from the List and returns it
+    pub fn remove(&mut self) -> T {
+        // SAFETY: All pointers should always be valid
+        unsafe {
+            self.next.map(|mut next| next.as_mut().prev = self.prev);
+            self.prev.map(|mut prev| prev.as_mut().next = self.next);
+        }
+
+        // SAFETY: A reference is always valid and we have the only one now
+        let node = unsafe { Box::from_raw(self) };
+        node.value
     }
 }
 
@@ -377,11 +382,11 @@ mod test {
     #[test]
     fn push_start_end() {
         let mut list = LinkedList::new();
-        list.push_end(3);
+        list.push_back(3);
         list.push_front(2);
         list.push_front(1);
-        list.push_end(4);
-        list.push_end(5);
+        list.push_back(4);
+        list.push_back(5);
         let vec = list.iter().cloned().collect::<Vec<_>>();
         assert_eq!(&vec[..], &[1, 2, 3, 4, 5]);
     }
@@ -426,13 +431,13 @@ mod test {
     fn node_operations() {
         let mut list = LinkedList::new();
         list.push_front(1);
-        list.push_end(2);
+        list.push_back(2);
         {
-            let node = list.get_node_mut(1).unwrap();
-            assert_eq!(*node.get_value(), 2);
+            let node = list.get_mut_node(1).unwrap();
+            assert_eq!(*node.get(), 2);
             node.push_after(4);
-            let next = node.get_next_mut().unwrap();
-            assert!(matches!(next.get_next(), None));
+            let next = node.next_mut().unwrap();
+            assert!(matches!(next.next(), None));
             next.push_before(3)
         }
         let vec = list.iter().cloned().collect::<Vec<_>>();
@@ -443,13 +448,28 @@ mod test {
     fn node_values() {
         let mut list = LinkedList::new();
         list.push_front(1);
-        let node = list.get_node_mut(0).unwrap();
-        assert_eq!(*node.get_value(), 1);
+        let node = list.get_mut_node(0).unwrap();
+        assert_eq!(*node.get(), 1);
         assert_eq!(node.replace_value(2), 1);
-        assert_eq!(*node.get_value(), 2);
+        assert_eq!(*node.get(), 2);
         node.push_after(3);
-        let node = node.get_next_mut().unwrap();
-        node.set_value(4);
-        assert_eq!(*node.get_value(), 4);
+        let node = node.next_mut().unwrap();
+        node.set(4);
+        assert_eq!(*node.get(), 4);
+    }
+
+    #[test]
+    fn node_removal() {
+        let mut list = LinkedList::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(4);
+        let node_two = list.get_mut_head_node().unwrap().next_mut().unwrap();
+        node_two.replace_value(3);
+        let three = node_two.remove();
+        assert_eq!(three, 3);
+        assert_eq!(list.get_head(), Some(&1));
+        assert_eq!(list.get_tail(), Some(&4));
+        assert_eq!(*list.get_head_node().unwrap().next().unwrap().get(), 4);
     }
 }
