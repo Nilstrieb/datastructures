@@ -83,10 +83,11 @@ fn iter_mut() {
 #[test]
 fn get_large_number() {
     let mut list = LinkedList::new();
-    for i in 0..1000000 {
+    // i had to make this smaller because of miri
+    for i in 0..10000 {
         list.push_front(i);
     }
-    assert_eq!(list.get(999999), Some(&0));
+    assert_eq!(list.get(9999), Some(&0));
 }
 
 #[test]
@@ -118,18 +119,6 @@ fn node_values() {
     let node = node.next_mut().unwrap();
     node.set(4);
     assert_eq!(*node.get(), 4);
-}
-
-#[test]
-fn node_removal() {
-    let mut list = create_list(&[1, 2, 4]);
-    let node_two = list.front_node_mut().unwrap().next_mut().unwrap();
-    node_two.replace_value(3);
-    let three = node_two.remove();
-    assert_eq!(three, 3);
-    assert_eq!(list.get_head(), Some(&1));
-    assert_eq!(list.get_tail(), Some(&4));
-    assert_eq!(*list.front_node().unwrap().next().unwrap().get(), 4);
 }
 
 #[test]

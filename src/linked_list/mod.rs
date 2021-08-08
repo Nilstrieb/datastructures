@@ -394,19 +394,6 @@ impl<T> Node<T> {
     pub fn replace_value(&mut self, value: T) -> T {
         std::mem::replace(&mut self.value, value)
     }
-
-    /// Removes a value from the List and returns it
-    pub fn remove(&mut self) -> T {
-        // SAFETY: All pointers should always be valid
-        unsafe {
-            self.next.map(|mut next| next.as_mut().prev = self.prev);
-            self.prev.map(|mut prev| prev.as_mut().next = self.next);
-        }
-
-        // SAFETY: A reference is always valid and we have the only one now
-        let node = unsafe { Box::from_raw(self) };
-        node.value
-    }
 }
 
 fn allocate_nonnull<T>(element: T) -> NonNull<T> {
