@@ -447,6 +447,12 @@ impl<T> IntoIter<T> {
     }
 }
 
+impl<T> Drop for IntoIter<T> {
+    fn drop(&mut self) {
+        while let Some(_) = self.next() {}
+    }
+}
+
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
