@@ -141,6 +141,12 @@ fn std_traits() {
     assert_eq!(list1, list_from_vec);
 }
 
+#[test]
+fn into_iter_not_consumed() {
+    let list = create_list(&[1, 2, 4, 6, 7, 4, 5, 7, 57, 5]);
+    list.into_iter();
+}
+
 /// Creates an owned list from a slice, not efficient at all but easy to use
 fn create_list<T: Clone>(iter: &[T]) -> LinkedList<T> {
     iter.into_iter().cloned().collect()
