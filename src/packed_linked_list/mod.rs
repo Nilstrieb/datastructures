@@ -119,7 +119,7 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
                 std::ptr::copy(
                     &node.values[1] as *const _,
                     &mut node.values[0] as *mut _,
-                    node.size,
+                    node.size - 1,
                 );
                 node.size -= 1;
             }
