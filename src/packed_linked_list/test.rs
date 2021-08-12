@@ -57,9 +57,7 @@ fn into_iter() {
     assert_eq!(iter.next(), None);
 }
 
-// ignore this test for now
 #[test]
-#[cfg(all(test, not(test)))]
 fn iter_mut() {
     let mut list = create_list(&[1, 2, 3, 4]);
     let mut iter_mut = list.iter_mut();

@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use datastructures::linked_list::LinkedList;
 use datastructures::packed_linked_list::PackedLinkedList;
 

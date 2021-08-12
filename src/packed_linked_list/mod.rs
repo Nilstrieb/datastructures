@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod test;
 
+use std::fmt::Formatter;
+use std::hash::Hasher;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::mem;
@@ -22,9 +24,11 @@ fn allocate_nonnull<T>(element: T) -> NonNull<T> {
 ///
 /// Another way to optimize a linked list is by having a `Vec` of nodes that each have relative references,
 /// but this implementation does not implement this.
+#[derive(Eq)]
 pub struct PackedLinkedList<T, const COUNT: usize> {
     first: Option<NonNull<Node<T, COUNT>>>,
     last: Option<NonNull<Node<T, COUNT>>>,
+    len: usize,
     _maker: PhantomData<T>,
 }
 
@@ -39,12 +43,19 @@ impl<T, const COUNT: usize> Drop for PackedLinkedList<T, COUNT> {
 }
 
 impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
+    /// Constructs an empty PackedLinkedList
     pub fn new() -> Self {
         Self {
             first: None,
             last: None,
+            len: 0,
             _maker: PhantomData,
         }
+    }
+
+    /// The length of the list (O(1))
+    pub fn len(&self) -> usize {
+        self.len
     }
 
     /// Pushes a new value to the front of the list
@@ -62,6 +73,7 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
                 }
                 Some(mut node) => node.as_mut().push_front(element),
             }
+            self.len += 1;
         }
     }
 
@@ -76,10 +88,11 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
                 }
                 Some(node) if node.as_ref().is_full() => {
                     self.insert_node_end();
-                    self.last.unwrap().as_mut().push_front(element)
+                    self.last.unwrap().as_mut().push_back(element)
                 }
                 Some(mut node) => node.as_mut().push_back(element),
             }
+            self.len += 1;
         }
     }
 
@@ -111,6 +124,7 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
                 node.size -= 1;
             }
 
+            self.len -= 1;
             Some(item)
         }
     }
@@ -141,13 +155,17 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
                 // more items
                 node.size -= 1;
             }
-
+            self.len -= 1;
             Some(item)
         }
     }
 
     pub fn iter(&self) -> Iter<T, COUNT> {
         Iter::new(self)
+    }
+
+    pub fn iter_mut(&mut self) -> IterMut<T, COUNT> {
+        IterMut::new(self)
     }
 
     pub fn into_iter(self) -> IntoIter<T, COUNT> {
@@ -194,6 +212,51 @@ impl<T, const COUNT: usize> Extend<T> for PackedLinkedList<T, COUNT> {
         while let Some(item) = iter.next() {
             self.push_back(item);
         }
+    }
+}
+
+impl<T, const COUNT: usize> std::fmt::Debug for PackedLinkedList<T, COUNT>
+where
+    T: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl<T, const COUNT: usize> Default for PackedLinkedList<T, COUNT> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, const COUNT: usize> Clone for PackedLinkedList<T, COUNT>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        self.iter().cloned().collect()
+    }
+}
+
+impl<T, const COUNT: usize> std::hash::Hash for PackedLinkedList<T, COUNT>
+where
+    T: std::hash::Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.iter().for_each(|item| item.hash(state))
+    }
+}
+
+impl<T, const COUNT: usize> PartialEq for PackedLinkedList<T, COUNT>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
@@ -291,6 +354,53 @@ impl<'a, T, const COUNT: usize> Iterator for Iter<'a, T, COUNT> {
                 // a node should never be empty
                 debug_assert_ne!(next_node.size, 0);
                 Some(next_node.values[0].as_ptr().as_ref().unwrap())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct IterMut<'a, T, const COUNT: usize> {
+    node: Option<NonNull<Node<T, COUNT>>>,
+    index: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T, const COUNT: usize> IterMut<'a, T, COUNT> {
+    fn new(list: &'a mut PackedLinkedList<T, COUNT>) -> Self {
+        Self {
+            node: list.first,
+            index: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: 'a, const COUNT: usize> Iterator for IterMut<'a, T, COUNT> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: assume that all pointers point to the correct nodes,
+        // and that the sizes of the nodes are set correctly
+        unsafe {
+            let mut node = self.node?;
+            let node = node.as_mut();
+            if node.size > self.index {
+                // take more
+                let ptr = node.values[self.index].as_ptr() as *mut T;
+                let item = ptr.as_mut().unwrap();
+                self.index += 1;
+
+                Some(item)
+            } else {
+                // next node
+                let mut next_node = node.next?;
+                debug_assert_ne!(next_node.as_ref().size, 0);
+                self.index = 1;
+                self.node = Some(next_node);
+                // a node should never be empty
+                let ptr = next_node.as_mut().values[0].as_ptr() as *mut T;
+                Some(ptr.as_mut().unwrap())
             }
         }
     }
