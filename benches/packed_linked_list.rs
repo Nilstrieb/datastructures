@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use datastructures::linked_list::LinkedList;
 use datastructures::packed_linked_list::PackedLinkedList;
 
@@ -55,9 +55,19 @@ fn push_back(c: &mut Criterion) {
     group.finish();
 }
 
+fn do_iterate<const COUNT: usize>(list: &PackedLinkedList<i32, COUNT>) {
+    let num: i32 = list.iter().sum();
+    black_box(num);
+}
+
+fn iterate(c: &mut Criterion) {
+    let list = create_random_packed_list_16(10_000_000);
+    c.bench_function("iterate", |b| b.iter(|| do_iterate(&list)));
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default();
-    targets = push_back
+    targets = iterate, push_back
 );
 criterion_main!(benches);
