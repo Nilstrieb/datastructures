@@ -12,7 +12,7 @@ use std::ptr::NonNull;
 
 fn allocate_nonnull<T>(element: T) -> NonNull<T> {
     // SAFETY: box is always non-null
-    unsafe { NonNull::new_unchecked(Box::leak(Box::new(element))) }
+    unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(element))) }
 }
 
 ///
@@ -363,6 +363,7 @@ impl<T, const COUNT: usize> Node<T, COUNT> {
         // copy all values up
         if COUNT > 1 {
             std::ptr::copy(
+                // todo miri error here
                 &self.values[index] as *const _,
                 &mut self.values[index + 1] as *mut _,
                 self.size - index,
@@ -506,8 +507,21 @@ impl<'a, T, const COUNT: usize> CursorMut<'a, T, COUNT> {
                     // SAFETY: the node is not full and the index is not out of bounds
                     (false, false) => unsafe { current.insert(element, self.index + 1) },
                     (false, true) => {
-                        // check whether the next node is full. if it is not full, insert it at the start
-                        // if it is full or the next node doesn't exist, allocate a new node inbetween
+                        // we need to copy some values to the next node, always allocate a new one to avoid needing to copy too many values
+                        // nodes that are not very full will make insertions faster later, so we prefer them
+                        unsafe {
+                            let mut next = self.allocate_new_node_after();
+                            let next = next.as_mut();
+                            let to_copy = next.size - self.index;
+                            std::ptr::copy_nonoverlapping(
+                                &current.values[self.index] as *const _,
+                                &mut next.values[0] as *mut _,
+                                to_copy,
+                            );
+                            current.values[self.index] = MaybeUninit::new(element);
+                            next.size = to_copy;
+                            current.size = self.index + 1;
+                        }
                     }
                 }
             }
@@ -656,7 +670,7 @@ mod iter {
                 node: list.first.map(|nn| unsafe { Box::from_raw(nn.as_ptr()) }),
                 index: 0,
             };
-            // do not drop the list
+            // do not drop the list, the iterator has taken 'ownership'
             mem::forget(list);
             iter
         }

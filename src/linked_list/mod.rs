@@ -399,7 +399,7 @@ impl<T> Node<T> {
 fn allocate_nonnull<T>(element: T) -> NonNull<T> {
     let boxed = Box::new(element);
     // SAFETY: box is always non-null
-    unsafe { NonNull::new_unchecked(Box::leak(boxed)) }
+    unsafe { NonNull::new_unchecked(Box::into_raw(boxed)) }
 }
 
 /// The iterator over the linked list
