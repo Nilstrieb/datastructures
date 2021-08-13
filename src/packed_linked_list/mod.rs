@@ -7,6 +7,7 @@ use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::mem;
 use std::mem::MaybeUninit;
+use std::option::Option::Some;
 use std::ptr::NonNull;
 
 fn allocate_nonnull<T>(element: T) -> NonNull<T> {
@@ -160,16 +161,56 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
         }
     }
 
-    pub fn iter(&self) -> Iter<T, COUNT> {
-        Iter::new(self)
+    pub fn cursor_front(&self) -> Cursor<T, COUNT> {
+        Cursor {
+            node: self.first,
+            index: 0,
+            list: self,
+        }
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<T, COUNT> {
-        IterMut::new(self)
+    pub fn cursor_back(&self) -> Cursor<T, COUNT> {
+        Cursor {
+            node: self.last,
+            // point to the last element in the last node, or 0 if no node is found
+            index: self
+                .last
+                .map(|last| unsafe { last.as_ref().size - 1 })
+                .unwrap_or(0),
+            list: self,
+        }
     }
 
-    pub fn into_iter(self) -> IntoIter<T, COUNT> {
-        IntoIter::new(self)
+    pub fn cursor_mut_front(&mut self) -> CursorMut<T, COUNT> {
+        CursorMut {
+            node: self.first,
+            index: 0,
+            list: self,
+        }
+    }
+
+    pub fn cursor_mut_back(&mut self) -> CursorMut<T, COUNT> {
+        CursorMut {
+            node: self.last,
+            // point to the last element in the last node, or 0 if no node is found
+            index: self
+                .last
+                .map(|last| unsafe { last.as_ref().size - 1 })
+                .unwrap_or(0),
+            list: self,
+        }
+    }
+
+    pub fn iter(&self) -> iter::Iter<T, COUNT> {
+        iter::Iter::new(self)
+    }
+
+    pub fn iter_mut(&mut self) -> iter::IterMut<T, COUNT> {
+        iter::IterMut::new(self)
+    }
+
+    pub fn into_iter(self) -> iter::IntoIter<T, COUNT> {
+        iter::IntoIter::new(self)
     }
 
     fn insert_node_start(&mut self) {
@@ -253,10 +294,7 @@ where
     T: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
-            return false;
-        }
-        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+        self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
@@ -316,158 +354,353 @@ impl<T, const COUNT: usize> Node<T, COUNT> {
         self.values[0] = MaybeUninit::new(element);
         self.size += 1;
     }
-}
 
-#[derive(Debug)]
-pub struct Iter<'a, T, const COUNT: usize> {
-    node: Option<&'a Node<T, COUNT>>,
-    index: usize,
-}
-
-impl<'a, T, const COUNT: usize> Iter<'a, T, COUNT> {
-    fn new(list: &'a PackedLinkedList<T, COUNT>) -> Self {
-        Self {
-            node: list.first.as_ref().map(|nn| unsafe { nn.as_ref() }),
-            index: 0,
+    /// Inserts a new value at the index, copying the values up
+    /// # Safety
+    /// The node must not be full and the index must not be out of bounds
+    unsafe fn insert(&mut self, element: T, index: usize) {
+        debug_assert!(self.size < COUNT);
+        // copy all values up
+        if COUNT > 1 {
+            std::ptr::copy(
+                &self.values[index] as *const _,
+                &mut self.values[index + 1] as *mut _,
+                self.size - index,
+            );
         }
+        self.values[index] = MaybeUninit::new(element);
     }
 }
 
-impl<'a, T, const COUNT: usize> Iterator for Iter<'a, T, COUNT> {
-    type Item = &'a T;
+macro_rules! implement_cursor {
+    ($cursor:ident) => {
+        impl<'a, T, const COUNT: usize> $cursor<'a, T, COUNT> {
+            pub fn get(&self) -> Option<&T> {
+                self.node
+                    .map(|nn| unsafe { nn.as_ref().values[self.index].as_ptr().as_ref().unwrap() })
+            }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let node = self.node?;
-        // SAFETY: assume that all pointers point to the correct nodes,
-        // and that the sizes of the nodes are set correctly
-        unsafe {
-            if node.size > self.index {
-                // take more
-                let item = node.values[self.index].as_ptr().as_ref().unwrap();
-                self.index += 1;
-                Some(item)
-            } else {
-                // next node
-                let next_node = node.next.as_ref()?.as_ref();
-                self.index = 1;
-                self.node = Some(next_node);
-                // a node should never be empty
-                debug_assert_ne!(next_node.size, 0);
-                Some(next_node.values[0].as_ptr().as_ref().unwrap())
+            pub fn move_next(&mut self) {
+                match self.node {
+                    None => {
+                        // currently on the ghost node, move to the first node
+                        self.node = self.list.first;
+                        self.index = 0;
+                    }
+                    Some(node) => unsafe {
+                        let node = node.as_ref();
+                        if self.index == node.size - 1 {
+                            // the last item, go to the next node
+                            self.node = node.next;
+                            self.index = 0;
+                        } else {
+                            // stay on the same node
+                            self.index += 1;
+                        }
+                    },
+                }
+            }
+            pub fn move_prev(&mut self) {
+                match self.node {
+                    None => {
+                        // currently on the ghost node, move to the first node
+                        self.node = self.list.last;
+                        self.index = self
+                            .list
+                            .last
+                            .map(|nn| unsafe { nn.as_ref().size - 1 })
+                            .unwrap_or(0);
+                    }
+                    Some(node) => unsafe {
+                        let node = node.as_ref();
+                        if self.index == 0 {
+                            // the first item, go to the previous node
+                            self.node = node.prev;
+                            self.index = node.prev.map(|nn| nn.as_ref().size - 1).unwrap_or(0);
+                        } else {
+                            // stay on the same node
+                            self.index -= 1;
+                        }
+                    },
+                }
             }
         }
-    }
+    };
 }
 
-#[derive(Debug)]
-pub struct IterMut<'a, T, const COUNT: usize> {
+/// A cursor for navigating the Packed Linked List
+pub struct Cursor<'a, T, const COUNT: usize> {
     node: Option<NonNull<Node<T, COUNT>>>,
     index: usize,
-    _marker: PhantomData<&'a T>,
+    list: &'a PackedLinkedList<T, COUNT>,
 }
 
-impl<'a, T, const COUNT: usize> IterMut<'a, T, COUNT> {
-    fn new(list: &'a mut PackedLinkedList<T, COUNT>) -> Self {
-        Self {
-            node: list.first,
-            index: 0,
-            _marker: PhantomData,
-        }
+// A cursor for navigating and editing the Packed Linked List
+pub struct CursorMut<'a, T, const COUNT: usize> {
+    node: Option<NonNull<Node<T, COUNT>>>,
+    index: usize,
+    list: &'a mut PackedLinkedList<T, COUNT>,
+}
+
+implement_cursor!(Cursor);
+implement_cursor!(CursorMut);
+
+impl<'a, T, const COUNT: usize> CursorMut<'a, T, COUNT> {
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        let index = self.index;
+        self.node
+            .as_mut()
+            .map(|nn| unsafe { nn.as_mut().values[index].as_mut_ptr().as_mut().unwrap() })
     }
-}
 
-impl<'a, T: 'a, const COUNT: usize> Iterator for IterMut<'a, T, COUNT> {
-    type Item = &'a mut T;
+    pub fn replace(&mut self, _element: T) -> Option<T> {
+        todo!()
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        // SAFETY: assume that all pointers point to the correct nodes,
-        // and that the sizes of the nodes are set correctly
-        unsafe {
-            let mut node = self.node?;
-            let node = node.as_mut();
-            if node.size > self.index {
-                // take more
-                let ptr = node.values[self.index].as_ptr() as *mut T;
-                let item = ptr.as_mut().unwrap();
-                self.index += 1;
+    pub fn remove(&mut self) -> Option<T> {
+        todo!()
+    }
 
-                Some(item)
-            } else {
-                // next node
-                let mut next_node = node.next?;
-                debug_assert_ne!(next_node.as_ref().size, 0);
-                self.index = 1;
-                self.node = Some(next_node);
-                // a node should never be empty
-                let ptr = next_node.as_mut().values[0].as_ptr() as *mut T;
-                Some(ptr.as_mut().unwrap())
+    /// Inserts a new element after the element this cursor is pointing to.  
+    /// If the cursor is pointing at the ghost node, the item gets inserted at the start of the list  
+    /// The cursor position will not change.  
+    pub fn insert_after(&mut self, element: T) {
+        match self.node {
+            None => self.list.push_front(element),
+            Some(mut current_node) => {
+                let current = unsafe { current_node.as_mut() };
+
+                // if we point at the last element, we do not need to copy anything
+                let append = self.index == current.size - 1;
+                // There are several cases here
+                // 1. we append an item to the node, and it is not full
+                // 2. we append an item to the node, and it is full
+                // 3. we insert an item into the node, and it is not full
+                // 4. we insert an item into the node, and it is full
+                match (append, current.is_full()) {
+                    (true, false) => {
+                        // SAFETY: the node is not full
+                        unsafe { current.push_back(element) };
+                    }
+                    (true, true) => {
+                        // check whether the next node is full. if it is not full, insert it at the start
+                        // if it is full or the next node doesn't exist, allocate a new node inbetween
+                        let next_node = unsafe { current.next.as_mut().map(|nn| nn.as_mut()) };
+                        let need_allocate = next_node
+                            .as_ref()
+                            .map(|node| node.is_full())
+                            .unwrap_or(true);
+
+                        if need_allocate {
+                            unsafe {
+                                let mut new_node = self.allocate_new_node_after();
+                                new_node.as_mut().push_back(element);
+                            }
+                        } else {
+                            let next_node = next_node
+                                .unwrap_or_else(|| unsafe { core::hint::unreachable_unchecked() });
+                            // SAFETY: the node is not full, because `need_allocate` is false
+                            unsafe { next_node.push_back(element) };
+                        }
+                    }
+                    // SAFETY: the node is not full and the index is not out of bounds
+                    (false, false) => unsafe { current.insert(element, self.index + 1) },
+                    (false, true) => {
+                        // check whether the next node is full. if it is not full, insert it at the start
+                        // if it is full or the next node doesn't exist, allocate a new node inbetween
+                    }
+                }
             }
         }
     }
-}
 
-#[derive(Debug)]
-pub struct IntoIter<T, const COUNT: usize> {
-    node: Option<Box<Node<T, COUNT>>>,
-    index: usize,
-}
+    pub fn insert_before(&mut self, _element: T) {}
 
-impl<T, const COUNT: usize> Drop for IntoIter<T, COUNT> {
-    fn drop(&mut self) {
-        while let Some(_) = self.next() {}
+    /// allocates a new node after the cursor
+    /// if self.node is None, it allocates the node at the start of the list
+    /// # Safety
+    /// The node must immediately be filled with at least on element, since an empty node is not a valid state
+    unsafe fn allocate_new_node_after(&mut self) -> NonNull<Node<T, COUNT>> {
+        let mut new_node = allocate_nonnull(Node::new(
+            self.node, None, // will be replaced in the match below
+        ));
+
+        match self.node {
+            None => {
+                match self.list.first {
+                    None => self.list.last = Some(new_node),
+                    Some(mut first) => first.as_mut().prev = Some(new_node),
+                }
+                new_node.as_mut().next = self.list.first;
+                self.list.first = Some(new_node);
+            }
+            Some(mut node) => {
+                new_node.as_mut().next = node.as_ref().next;
+                node.as_mut().next = Some(new_node);
+            }
+        }
+        new_node
     }
 }
 
-impl<T, const COUNT: usize> IntoIter<T, COUNT> {
-    fn new(list: PackedLinkedList<T, COUNT>) -> Self {
-        let iter = Self {
-            node: list.first.map(|nn| unsafe { Box::from_raw(nn.as_ptr()) }),
-            index: 0,
-        };
-        // do not drop the list
-        mem::forget(list);
-        iter
+mod iter {
+    use super::{Node, PackedLinkedList};
+    use std::marker::PhantomData;
+    use std::mem;
+    use std::mem::MaybeUninit;
+    use std::ptr::NonNull;
+
+    #[derive(Debug)]
+    pub struct Iter<'a, T, const COUNT: usize> {
+        node: Option<&'a Node<T, COUNT>>,
+        index: usize,
     }
-}
 
-impl<T, const COUNT: usize> Iterator for IntoIter<T, COUNT> {
-    type Item = T;
+    impl<'a, T, const COUNT: usize> Iter<'a, T, COUNT> {
+        pub(super) fn new(list: &'a PackedLinkedList<T, COUNT>) -> Self {
+            Self {
+                node: list.first.as_ref().map(|nn| unsafe { nn.as_ref() }),
+                index: 0,
+            }
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        // take the node. the node has to either be returned or replaced by a new one. the None left
-        // behind here is *not* a valid state
-        let mut node = self.node.take()?;
+    impl<'a, T, const COUNT: usize> Iterator for Iter<'a, T, COUNT> {
+        type Item = &'a T;
 
-        // SAFETY: see more detailed comments
-        unsafe {
-            if node.size > self.index {
-                // take more items from the node
-                // take out the item and replace it with uninitialized memory
-                // the index pointer is increased, so no one will access this again
-                let item =
-                    mem::replace(&mut node.values[self.index], MaybeUninit::uninit()).assume_init();
-                self.index += 1;
-                // re-insert the node
-                self.node = Some(node);
-                Some(item)
-            } else {
-                // go to the next node
-                // if next is empty, return None and stop the iteration
-                // take ownership over the node. the last node will be dropped here
-                let mut next_node = Box::from_raw(node.next?.as_ptr());
-                next_node.prev = None;
-                self.index = 1;
-                // a node should never be empty
-                debug_assert_ne!(next_node.size, 0);
-                self.node = Some(next_node);
-                // see comment above
-                Some(
-                    mem::replace(
-                        &mut self.node.as_mut().unwrap().values[0],
-                        MaybeUninit::uninit(),
+        fn next(&mut self) -> Option<Self::Item> {
+            let node = self.node?;
+            // SAFETY: assume that all pointers point to the correct nodes,
+            // and that the sizes of the nodes are set correctly
+            unsafe {
+                if node.size > self.index {
+                    // take more
+                    let item = node.values[self.index].as_ptr().as_ref().unwrap();
+                    self.index += 1;
+                    Some(item)
+                } else {
+                    // next node
+                    let next_node = node.next.as_ref()?.as_ref();
+                    self.index = 1;
+                    self.node = Some(next_node);
+                    // a node should never be empty
+                    debug_assert_ne!(next_node.size, 0);
+                    Some(next_node.values[0].as_ptr().as_ref().unwrap())
+                }
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct IterMut<'a, T, const COUNT: usize> {
+        node: Option<NonNull<Node<T, COUNT>>>,
+        index: usize,
+        _marker: PhantomData<&'a T>,
+    }
+
+    impl<'a, T, const COUNT: usize> IterMut<'a, T, COUNT> {
+        pub(super) fn new(list: &'a mut PackedLinkedList<T, COUNT>) -> Self {
+            Self {
+                node: list.first,
+                index: 0,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<'a, T: 'a, const COUNT: usize> Iterator for IterMut<'a, T, COUNT> {
+        type Item = &'a mut T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            // SAFETY: assume that all pointers point to the correct nodes,
+            // and that the sizes of the nodes are set correctly
+            unsafe {
+                let mut node = self.node?;
+                let node = node.as_mut();
+                if node.size > self.index {
+                    // take more
+                    let ptr = node.values[self.index].as_ptr() as *mut T;
+                    let item = ptr.as_mut().unwrap();
+                    self.index += 1;
+
+                    Some(item)
+                } else {
+                    // next node
+                    let mut next_node = node.next?;
+                    debug_assert_ne!(next_node.as_ref().size, 0);
+                    self.index = 1;
+                    self.node = Some(next_node);
+                    // a node should never be empty
+                    let ptr = next_node.as_mut().values[0].as_ptr() as *mut T;
+                    Some(ptr.as_mut().unwrap())
+                }
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct IntoIter<T, const COUNT: usize> {
+        node: Option<Box<Node<T, COUNT>>>,
+        index: usize,
+    }
+
+    impl<T, const COUNT: usize> Drop for IntoIter<T, COUNT> {
+        fn drop(&mut self) {
+            while let Some(_) = self.next() {}
+        }
+    }
+
+    impl<T, const COUNT: usize> IntoIter<T, COUNT> {
+        pub(super) fn new(list: PackedLinkedList<T, COUNT>) -> Self {
+            let iter = Self {
+                node: list.first.map(|nn| unsafe { Box::from_raw(nn.as_ptr()) }),
+                index: 0,
+            };
+            // do not drop the list
+            mem::forget(list);
+            iter
+        }
+    }
+
+    impl<T, const COUNT: usize> Iterator for IntoIter<T, COUNT> {
+        type Item = T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            // take the node. the node has to either be returned or replaced by a new one. the None left
+            // behind here is *not* a valid state
+            let mut node = self.node.take()?;
+
+            // SAFETY: see more detailed comments
+            unsafe {
+                if node.size > self.index {
+                    // take more items from the node
+                    // take out the item and replace it with uninitialized memory
+                    // the index pointer is increased, so no one will access this again
+                    let item = mem::replace(&mut node.values[self.index], MaybeUninit::uninit())
+                        .assume_init();
+                    self.index += 1;
+                    // re-insert the node
+                    self.node = Some(node);
+                    Some(item)
+                } else {
+                    // go to the next node
+                    // if next is empty, return None and stop the iteration
+                    // take ownership over the node. the last node will be dropped here
+                    let mut next_node = Box::from_raw(node.next?.as_ptr());
+                    next_node.prev = None;
+                    self.index = 1;
+                    // a node should never be empty
+                    debug_assert_ne!(next_node.size, 0);
+                    self.node = Some(next_node);
+                    // see comment above
+                    Some(
+                        mem::replace(
+                            &mut self.node.as_mut().unwrap().values[0],
+                            MaybeUninit::uninit(),
+                        )
+                        .assume_init(),
                     )
-                    .assume_init(),
-                )
+                }
             }
         }
     }

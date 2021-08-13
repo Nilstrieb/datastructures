@@ -76,6 +76,48 @@ fn from_iter() {
     assert!(list_iter.zip(vec.iter()).all(|(a, b)| a == b));
 }
 
+#[test]
+fn get_cursor() {
+    let list = create_list(&[1, 2, 3, 4, 5, 6]);
+    let mut cursor = list.cursor_front();
+    assert_eq!(cursor.get(), Some(&1));
+    cursor.move_next();
+    assert_eq!(cursor.get(), Some(&2));
+    cursor.move_prev();
+    assert_eq!(cursor.get(), Some(&1));
+    cursor.move_prev();
+    assert_eq!(cursor.get(), None);
+    cursor.move_prev();
+    assert_eq!(cursor.get(), Some(&6));
+    cursor.move_prev();
+    cursor.move_prev();
+    cursor.move_prev();
+    cursor.move_prev();
+    cursor.move_prev();
+    assert_eq!(cursor.get(), Some(&1));
+    cursor.move_prev();
+    cursor.move_next();
+    assert_eq!(cursor.get(), Some(&1));
+}
+
+#[test]
+fn insert_cursor() {
+    let mut list = create_list(&[1, 2, 3, 4, 5, 6]);
+    let mut cursor = list.cursor_mut_front();
+    cursor.move_prev();
+    cursor.move_prev();
+    *cursor.get_mut().unwrap() = 100;
+    cursor.move_next();
+    cursor.move_next();
+    cursor.insert_after(11);
+    cursor.insert_before(0);
+    cursor.move_next();
+    assert_eq!(cursor.replace(12), Some(1));
+    assert_eq!(cursor.get(), Some(&12));
+    assert_eq!(cursor.remove(), Some(12));
+    assert_eq!(list, create_list(&[0, 11, 2, 3, 4, 5, 100]));
+}
+
 fn create_list<T: Clone>(iter: &[T]) -> PackedLinkedList<T, 16> {
     iter.into_iter().cloned().collect()
 }
