@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::hash::Hasher;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
@@ -256,10 +256,7 @@ impl<T, const COUNT: usize> Extend<T> for PackedLinkedList<T, COUNT> {
     }
 }
 
-impl<T, const COUNT: usize> std::fmt::Debug for PackedLinkedList<T, COUNT>
-where
-    T: std::fmt::Debug,
-{
+impl<T: std::fmt::Debug, const COUNT: usize> std::fmt::Debug for PackedLinkedList<T, COUNT> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -271,28 +268,19 @@ impl<T, const COUNT: usize> Default for PackedLinkedList<T, COUNT> {
     }
 }
 
-impl<T, const COUNT: usize> Clone for PackedLinkedList<T, COUNT>
-where
-    T: Clone,
-{
+impl<T: Clone, const COUNT: usize> Clone for PackedLinkedList<T, COUNT> {
     fn clone(&self) -> Self {
         self.iter().cloned().collect()
     }
 }
 
-impl<T, const COUNT: usize> std::hash::Hash for PackedLinkedList<T, COUNT>
-where
-    T: std::hash::Hash,
-{
+impl<T: std::hash::Hash, const COUNT: usize> std::hash::Hash for PackedLinkedList<T, COUNT> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.iter().for_each(|item| item.hash(state))
     }
 }
 
-impl<T, const COUNT: usize> PartialEq for PackedLinkedList<T, COUNT>
-where
-    T: PartialEq,
-{
+impl<T: PartialEq, const COUNT: usize> PartialEq for PackedLinkedList<T, COUNT> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
@@ -303,12 +291,32 @@ where
 /// The node can have 1 to `COUNT` items.
 /// A node is never guaranteed to be full, even if it has a next node
 /// A node is always guaranteed to be non-empty
-#[derive(Debug)]
 struct Node<T, const COUNT: usize> {
     prev: Option<NonNull<Node<T, COUNT>>>,
     next: Option<NonNull<Node<T, COUNT>>>,
     values: [MaybeUninit<T>; COUNT],
     size: usize,
+}
+
+impl<T: Debug, const COUNT: usize> Debug for Node<T, COUNT> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Node")
+            .field("prev", &self.prev)
+            .field("next", &self.next)
+            .field("values", &{
+                let mut str = String::from("[");
+                for i in 0..self.size {
+                    str.push_str(&format!("{:?}, ", unsafe { &*self.values[i].as_ptr() }))
+                }
+                for _ in self.size..COUNT {
+                    str.push_str("(uninit), ")
+                }
+                str.push(']');
+                str
+            })
+            .field("size", &self.size)
+            .finish()
+    }
 }
 
 impl<T, const COUNT: usize> Node<T, COUNT> {
@@ -358,18 +366,17 @@ impl<T, const COUNT: usize> Node<T, COUNT> {
     /// Inserts a new value at the index, copying the values up
     /// # Safety
     /// The node must not be full and the index must not be out of bounds
+    /// This function should not be called on an empty node, use `push_back` instead
     unsafe fn insert(&mut self, element: T, index: usize) {
         debug_assert!(self.size < COUNT);
+        debug_assert!(self.size > index);
         // copy all values up
-        if COUNT > 1 {
-            std::ptr::copy(
-                // todo miri error here
-                &self.values[index] as *const _,
-                &mut self.values[index + 1] as *mut _,
-                self.size - index,
-            );
+        for i in (index..self.size).rev() {
+            println!("{}", i);
+            self.values[i + 1] = mem::replace(&mut self.values[i], MaybeUninit::uninit());
         }
         self.values[index] = MaybeUninit::new(element);
+        self.size += 1;
     }
 }
 
@@ -509,21 +516,29 @@ impl<'a, T, const COUNT: usize> CursorMut<'a, T, COUNT> {
                     (false, true) => {
                         // we need to copy some values to the next node, always allocate a new one to avoid needing to copy too many values
                         // nodes that are not very full will make insertions faster later, so we prefer them
+                        // this is a bad though if we repeatedly insert at the same position here, so maybe we want to insert it into the next node anyways
                         unsafe {
                             let mut next = self.allocate_new_node_after();
-                            let next = next.as_mut();
-                            let to_copy = next.size - self.index;
+                            let mut next = next.as_mut();
+                            // example: current node of COUNT=8 is full, we want to insert at 7
+                            // self.index=6
+                            // copy 2 values to the next node, 7 & 8
+                            let to_copy = current.size - self.index;
                             std::ptr::copy_nonoverlapping(
-                                &current.values[self.index] as *const _,
-                                &mut next.values[0] as *mut _,
+                                current.values[self.index + 1].as_ptr(),
+                                next.values[0].as_mut_ptr(),
                                 to_copy,
                             );
-                            current.values[self.index] = MaybeUninit::new(element);
+                            //for i in self.index..5 {
+                            //
+                            //}
+                            current.values[self.index + 1] = MaybeUninit::new(element);
                             next.size = to_copy;
-                            current.size = self.index + 1;
+                            current.size = self.index + 2;
                         }
                     }
                 }
+                self.list.len += 1;
             }
         }
     }

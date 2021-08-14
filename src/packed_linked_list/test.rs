@@ -101,6 +101,7 @@ fn get_cursor() {
 }
 
 #[test]
+#[ignore]
 fn insert_cursor() {
     let mut list = create_list(&[1, 2, 3, 4, 5, 6]);
     let mut cursor = list.cursor_mut_front();
@@ -118,7 +119,22 @@ fn insert_cursor() {
     assert_eq!(list, create_list(&[0, 11, 2, 3, 4, 5, 100]));
 }
 
-fn create_list<T: Clone>(iter: &[T]) -> PackedLinkedList<T, 16> {
+#[test]
+fn insert_after_cursor() {
+    let mut list = create_sized_list(&[1, 2, 3]);
+    let mut cursor = list.cursor_mut_front();
+    // case 3
+    cursor.insert_after(11);
+    assert_eq!(list, create_list(&[1, 11, 2, 3]));
+
+    let mut list = create_sized_list::<_, 4>(&[1, 2, 3, 4]);
+    let mut cursor = list.cursor_mut_front();
+    // case 4
+    cursor.insert_after(11);
+    assert_eq!(list, create_sized_list(&[1, 11, 2, 3, 4]));
+}
+
+fn create_list<T: Clone>(iter: &[T]) -> PackedLinkedList<T, 8> {
     iter.into_iter().cloned().collect()
 }
 
