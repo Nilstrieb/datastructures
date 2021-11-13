@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BinaryTree<T>(Node<T>);
@@ -31,7 +31,7 @@ pub trait DisplayTree {
     fn display(&self) -> String;
 }
 
-impl<T: Display> DisplayTree for Node<T> {
+impl<T: Display + Debug> DisplayTree for Node<T> {
     fn depth(&self) -> usize {
         self.lhs
             .as_ref()
@@ -52,55 +52,29 @@ impl<T: Display> DisplayTree for Node<T> {
     }
 
     fn amount_of_con(&self) -> usize {
-        let depth = self.depth();
-        if depth == 0 {
-            0
-        } else {
-            2_usize.pow((depth - 1) as u32)
+        fn amount(n: usize) -> usize {
+            match n {
+                0 => 0,
+                2 => 2,
+                n => amount(n - 1) * 2 + 1,
+            }
         }
+
+        amount(self.depth())
     }
 
     fn display(&self) -> String {
+        const SPACE: &str = " ";
+
         let mut str = String::new();
 
-        let offset_x = self.offset_x();
-
-        // top level
-
-        str.push_str(&".".repeat(offset_x));
-        str.push_str(&self.val.to_string());
-        str.push('\n');
-
-        for i in 0..self.amount_of_con() {
-            str.push_str(&".".repeat(offset_x - i - 1));
-            str.push('/');
-            str.push_str(&".".repeat(1 + 2 * i));
-            str.push('\\');
-            str.push('\n');
-        }
-
-        // rest
-        // let mut next_nodes = vec![];
-        let mut current_nodes = vec![&self.lhs, &self.rhs]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+        let mut current_nodes = vec![self];
 
         while current_nodes.len() > 0 {
             // display node layer
 
-            for (i, node) in current_nodes.iter().enumerate() {
-                // print node values
-                str.push_str(&".".repeat(node.offset_x()));
-                str.push_str(&node.val.to_string());
-                if i != current_nodes.len() - 1 {
-                    str.push_str(&".".repeat(node.offset_x() + 1));
-                }
-            }
-            str.push('\n');
-            // print node connections
-
             let mut offset = 0;
+            let mut is_left = true;
             let nodes_with_offset = current_nodes
                 .iter()
                 .map(|node| {
@@ -108,9 +82,24 @@ impl<T: Display> DisplayTree for Node<T> {
                     let this_offset = offset;
                     offset += node.val.to_string().len();
                     offset += node.offset_x() + 1;
+                    if node.depth() == 0 && is_left {
+                        offset += 2;
+                    }
+                    is_left = !is_left;
                     (this_offset, node)
                 })
                 .collect::<Vec<_>>();
+
+            let mut prev_offset = 0;
+            for (offset, node) in &nodes_with_offset {
+                let diff_offset = offset - prev_offset;
+                str.push_str(&SPACE.repeat(diff_offset));
+                let value_str = node.val.to_string();
+                str.push_str(&value_str);
+                prev_offset += diff_offset + value_str.len();
+            }
+            str.push('\n');
+            // print node connections
 
             let amount_of_con = current_nodes
                 .first()
@@ -132,7 +121,7 @@ impl<T: Display> DisplayTree for Node<T> {
                 let mut prev_offset = 0;
                 for (offset, con) in connections {
                     let diff_offset = offset - prev_offset;
-                    str.push_str(&".".repeat(diff_offset));
+                    str.push_str(&SPACE.repeat(diff_offset));
                     str.push(con);
                     prev_offset += diff_offset + 1;
                 }
@@ -140,11 +129,12 @@ impl<T: Display> DisplayTree for Node<T> {
             }
 
             current_nodes = current_nodes
-                .into_iter()
+                .iter()
                 .map(|node| [&node.lhs, &node.rhs])
                 .flatten()
                 .flatten()
-                .collect();
+                .map(|boxed| &**boxed)
+                .collect::<Vec<_>>();
         }
 
         str
@@ -163,6 +153,14 @@ mod test {
         );
 
         println!("{}", tree.display());
+        let cooler_tree = Node::new(5, Some(tree.clone()), Some(tree.clone()));
+        println!("{}", cooler_tree.display());
+
+        let epic_tree = Node::new(5, Some(cooler_tree.clone()), Some(cooler_tree.clone()));
+        println!("{}", epic_tree.display());
+
+        let giant_tree = Node::new(5, Some(epic_tree.clone()), Some(epic_tree.clone()));
+        println!("{}", giant_tree.display());
 
         panic!("fail");
     }
