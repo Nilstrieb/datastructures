@@ -146,6 +146,8 @@ mod test {
 
     #[test]
     fn print_cool_tree() {
+        // run this test with no capture off or let it fail
+
         let tree = Node::new(
             4,
             Some(Node::new(2, Some(Node::leaf(1)), Some(Node::leaf(3)))),
@@ -162,6 +164,6 @@ mod test {
         let giant_tree = Node::new(5, Some(epic_tree.clone()), Some(epic_tree.clone()));
         println!("{}", giant_tree.display());
 
-        panic!("fail");
+        // panic!("let this fail for printing");
     }
 }
