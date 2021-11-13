@@ -70,7 +70,7 @@ impl<T: Display + Debug> DisplayTree for Node<T> {
 
         let mut current_nodes = vec![self];
 
-        while current_nodes.len() > 0 {
+        while !current_nodes.is_empty() {
             // display node layer
 
             let mut offset = 0;

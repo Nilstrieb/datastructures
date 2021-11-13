@@ -222,6 +222,13 @@ impl<T> LinkedList<T> {
         self.iter().count()
     }
 
+    /// Checks whether the list is empty
+    ///
+    /// See [LinkedList::len]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns an iterator over the items
     pub fn iter(&self) -> Iter<T> {
         Iter::new(self)
@@ -230,11 +237,6 @@ impl<T> LinkedList<T> {
     /// Returns a mut iterator over the items
     pub fn iter_mut(&mut self) -> IterMut<T> {
         IterMut::new(self)
-    }
-
-    /// Returns an iterator owning the items
-    pub fn into_iter(self) -> IntoIter<T> {
-        IntoIter::new(self)
     }
 }
 
@@ -278,11 +280,20 @@ impl<T: PartialEq> PartialEq for LinkedList<T> {
     }
 }
 
+impl<T> IntoIterator for LinkedList<T> {
+    type Item = T;
+    type IntoIter = IntoIter<Self::Item>;
+
+    /// Returns an iterator owning the items
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter::new(self)
+    }
+}
+
 impl<T> FromIterator<T> for LinkedList<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut iter = iter.into_iter();
         let mut list = Self::new();
-        while let Some(item) = iter.next() {
+        for item in iter {
             list.push_back(item)
         }
         list
@@ -291,8 +302,7 @@ impl<T> FromIterator<T> for LinkedList<T> {
 
 impl<T> Extend<T> for LinkedList<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        let mut iter = iter.into_iter();
-        while let Some(item) = iter.next() {
+        for item in iter {
             self.push_back(item)
         }
     }
@@ -339,10 +349,10 @@ impl<T> Node<T> {
             next: self.next,
             prev: NonNull::new(self as _),
         }));
-        self.next.map(|mut next| {
+        if let Some(mut next) = self.next {
             // SAFETY: All pointers should always be valid and created from a box
-            unsafe { next.as_mut() }.prev = new_node
-        });
+            unsafe { next.as_mut() }.prev = new_node;
+        }
         self.next = new_node;
     }
 
@@ -353,10 +363,10 @@ impl<T> Node<T> {
             next: NonNull::new(self as _),
             prev: self.prev,
         }));
-        self.prev.map(|mut next| {
+        if let Some(mut next) = self.prev {
             // SAFETY: All pointers should always be valid and created from a box
-            unsafe { next.as_mut() }.next = new_node
-        });
+            unsafe { next.as_mut() }.next = new_node;
+        }
         self.prev = new_node;
     }
 
@@ -449,7 +459,7 @@ impl<T> IntoIter<T> {
 
 impl<T> Drop for IntoIter<T> {
     fn drop(&mut self) {
-        while let Some(_) = self.next() {}
+        for _ in self {}
     }
 }
 

@@ -37,7 +37,7 @@ fn create_random_packed_list_128(size: usize) -> PackedLinkedList<i32, 128> {
 
 fn push_back(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_back");
-    for i in [100, 1_0000_00].iter() {
+    for i in [100, 1_000_000].iter() {
         group.bench_with_input(BenchmarkId::new("create_random_list", i), i, |b, i| {
             b.iter(|| create_random_list(*i))
         });

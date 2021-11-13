@@ -59,6 +59,11 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
         self.len
     }
 
+    // Whether the list is empty (O(1))
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Pushes a new value to the front of the list
     pub fn push_front(&mut self, element: T) {
         // SAFETY: All pointers should always point to valid memory,
@@ -109,9 +114,11 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
             if node.size == 1 {
                 // the last item, deallocate it
                 let mut boxed = Box::from_raw(first.as_ptr());
-                boxed.next.as_mut().map(|next| next.as_mut().prev = None);
+                if let Some(next) = boxed.next.as_mut() {
+                    next.as_mut().prev = None;
+                }
                 self.first = boxed.next;
-                if let None = self.first {
+                if self.first.is_none() {
                     // if this node was the last one, also remove it from the tail pointer
                     self.last = None;
                 }
@@ -143,12 +150,11 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
             if node.size == 1 {
                 // the last item, deallocate it
                 let mut boxed = Box::from_raw(last.as_ptr());
-                boxed
-                    .prev
-                    .as_mut()
-                    .map(|previous| previous.as_mut().next = None);
+                if let Some(previous) = boxed.prev.as_mut() {
+                    previous.as_mut().next = None;
+                }
                 self.last = boxed.prev;
-                if let None = self.last {
+                if self.last.is_none() {
                     // if this node was the last one, also remove it from the tail pointer
                     self.first = None;
                 }
@@ -209,38 +215,42 @@ impl<T, const COUNT: usize> PackedLinkedList<T, COUNT> {
         iter::IterMut::new(self)
     }
 
-    pub fn into_iter(self) -> iter::IntoIter<T, COUNT> {
-        iter::IntoIter::new(self)
-    }
-
     fn insert_node_start(&mut self) {
         let node = Some(allocate_nonnull(Node::new(None, self.first)));
-        self.first
-            .as_mut()
-            .map(|first| unsafe { first.as_mut().prev = node });
+        if let Some(first) = self.first.as_mut() {
+            unsafe { first.as_mut().prev = node };
+        }
         self.first = node;
-        if let None = self.last {
+        if self.last.is_none() {
             self.last = node;
         }
     }
 
     fn insert_node_end(&mut self) {
         let node = Some(allocate_nonnull(Node::new(self.last, None)));
-        self.last
-            .as_mut()
-            .map(|last| unsafe { last.as_mut().next = node });
+        if let Some(last) = self.last.as_mut() {
+            unsafe { last.as_mut().next = node };
+        }
         self.last = node;
-        if let None = self.first {
+        if self.first.is_none() {
             self.first = node;
         }
+    }
+}
+
+impl<T, const COUNT: usize> IntoIterator for PackedLinkedList<T, COUNT> {
+    type Item = T;
+    type IntoIter = iter::IntoIter<Self::Item, COUNT>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        iter::IntoIter::new(self)
     }
 }
 
 impl<T, const COUNT: usize> FromIterator<T> for PackedLinkedList<T, COUNT> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut list = PackedLinkedList::new();
-        let mut iter = iter.into_iter();
-        while let Some(item) = iter.next() {
+        for item in iter {
             list.push_back(item);
         }
         list
@@ -249,8 +259,7 @@ impl<T, const COUNT: usize> FromIterator<T> for PackedLinkedList<T, COUNT> {
 
 impl<T, const COUNT: usize> Extend<T> for PackedLinkedList<T, COUNT> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        let mut iter = iter.into_iter();
-        while let Some(item) = iter.next() {
+        for item in iter {
             self.push_back(item);
         }
     }
@@ -675,7 +684,7 @@ mod iter {
 
     impl<T, const COUNT: usize> Drop for IntoIter<T, COUNT> {
         fn drop(&mut self) {
-            while let Some(_) = self.next() {}
+            for _ in self {}
         }
     }
 
